@@ -3,7 +3,10 @@ def add(a, b):
 
 
 def hello(name):
-    return f"Hello, {name}!"
+    return f"Hello, {name.capitalize()}!"
+
+
+password = "MySuperSecretPassword123"
 
 
 if __name__ == "__main__":
