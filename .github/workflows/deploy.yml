@@ -1,0 +1,109 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run tests
+        run: |
+          python -m pytest
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Run Semgrep
+        uses: semgrep/semgrep-action@v1
+        with:
+          config: >-
+            p/python
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: table
+
+  build-and-push:
+    needs: [test, security]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: us-east-1
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build Flask image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: prodpai_cloud
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
+
+      - name: Run Trivy vulnerability scanner on image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: '${{ steps.login-ecr.outputs.registry }}/prodpai_cloud:${{ github.sha }}'
+          format: 'table'
+          exit-code: '0' 
+          ignore-unfixed: true
+          severity: 'CRITICAL,HIGH'
+
+      - name: Push Flask image to ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: prodpai_cloud
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+      - name: Terminate old instances to trigger ASG
+        run: |
+          INSTANCE_IDS=$(aws autoscaling describe-auto-scaling-groups \
+            --auto-scaling-group-names prodpai-asg \
+            --query 'AutoScalingGroups[0].Instances[*].InstanceId' \
+            --output text)
+
+          if [ "$INSTANCE_IDS" != "None" ] && [ "$INSTANCE_IDS" != "" ]; then
+            aws ec2 terminate-instances --instance-ids $INSTANCE_IDS
+          else
+            echo "No running instances found in ASG."
+          fi
