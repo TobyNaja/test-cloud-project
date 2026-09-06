@@ -10,4 +10,4 @@ def client():
 def test_hello_route(client):
     response = client.get("/")
     assert response.status_code == 200
-    assert b"hello Prodpai Cloud" in response.data
+    assert b"Hello World v2 - CI/CD Auto Deploy Success!" in response.data
