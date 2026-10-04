@@ -14,7 +14,7 @@ def health_check():
 @app.route("/ping")
 def ping():
     host = request.args.get("host", "127.0.0.1")
-    return subprocess.check_output("ping -c1 " + host, shell=True).decode()
+    return subprocess.check_output(["ping", "-c1", host]).decode()
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080) # nosemgrep
