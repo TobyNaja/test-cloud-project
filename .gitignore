@@ -13,3 +13,4 @@ note.txt
 sbom.json
 venv/
 .DS_Store
+image_png/
