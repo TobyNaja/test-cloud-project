@@ -7,7 +7,7 @@ on:
   pull_request:
     branches:
       - main
-
+  workflow_dispatch:
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -23,7 +23,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
 
       - name: Run tests
         run: |
@@ -35,11 +35,19 @@ jobs:
       - name: Checkout source code
         uses: actions/checkout@v4
 
-      - name: Run Semgrep
-        uses: semgrep/semgrep-action@v1
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          config: >-
-            p/python
+          python-version: "3.11"
+
+      - name: Install Semgrep
+        run: |
+          python -m pip install --upgrade pip
+          pip install semgrep
+
+      - name: Run Semgrep
+        run: |
+          semgrep --config p/python --error --strict .
 
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
@@ -47,9 +55,12 @@ jobs:
           scan-type: fs
           scan-ref: .
           format: table
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
 
   build-and-push:
     needs: [test, security]
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout source code
@@ -70,40 +81,57 @@ jobs:
       - name: Build Flask image
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPOSITORY: prodpai_cloud
+          ECR_REPOSITORY: prodpai-app
           IMAGE_TAG: ${{ github.sha }}
         run: |
           docker build \
             -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
             -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
 
-      - name: Run Trivy vulnerability scanner on image
+      - name: Run Trivy vulnerability scanner on image (Security Gate)
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: '${{ steps.login-ecr.outputs.registry }}/prodpai_cloud:${{ github.sha }}'
+          image-ref: '${{ steps.login-ecr.outputs.registry }}/prodpai-app:${{ github.sha }}'
           format: 'table'
-          exit-code: '0' 
+          exit-code: '1'
           ignore-unfixed: true
           severity: 'CRITICAL,HIGH'
+
+      - name: Generate SBOM from image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: '${{ steps.login-ecr.outputs.registry }}/prodpai-app:${{ github.sha }}'
+          scan-type: 'image'
+          format: 'cyclonedx'
+          output: 'sbom.json'
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-${{ github.sha }}
+          path: sbom.json
 
       - name: Push Flask image to ECR
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPOSITORY: prodpai_cloud
+          ECR_REPOSITORY: prodpai-app
           IMAGE_TAG: ${{ github.sha }}
         run: |
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
 
-      - name: Terminate old instances to trigger ASG
-        run: |
-          INSTANCE_IDS=$(aws autoscaling describe-auto-scaling-groups \
-            --auto-scaling-group-names prodpai-asg \
-            --query 'AutoScalingGroups[0].Instances[*].InstanceId' \
-            --output text)
-
-          if [ "$INSTANCE_IDS" != "None" ] && [ "$INSTANCE_IDS" != "" ]; then
-            aws ec2 terminate-instances --instance-ids $INSTANCE_IDS
-          else
-            echo "No running instances found in ASG."
-          fi
+      # TODO (infra not applied yet): re-enable ASG recycle after terraform apply.
+      # - name: Terminate old instances to trigger ASG
+      #   env:
+      #     ASG_NAME: prod-pai-env-asg
+      #   run: |
+      #     INSTANCE_IDS=$(aws autoscaling describe-auto-scaling-groups \
+      #       --auto-scaling-group-names "$ASG_NAME" \
+      #       --query 'AutoScalingGroups[0].Instances[*].InstanceId' \
+      #       --output text)
+      #
+      #     if [ "$INSTANCE_IDS" != "None" ] && [ "$INSTANCE_IDS" != "" ]; then
+      #       aws ec2 terminate-instances --instance-ids $INSTANCE_IDS
+      #     else
+      #       echo "No running instances found in ASG ($ASG_NAME)."
+      #     fi

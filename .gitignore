@@ -4,3 +4,12 @@ __pycache__/
 .env
 .pytest_cache/
 note.txt
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+.terraform/
+.terraform.lock.hcl
+.terraform.lock.hcl.tmp
+sbom.json
+venv/
+.DS_Store
