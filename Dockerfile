@@ -5,8 +5,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/* \
     && pip install --no-cache-dir --upgrade setuptools wheel \
-    && pip install --no-cache-dir -r requirements.txt \
-    && pip install --no-cache-dir urllib3==1.26.5
+    && pip install --no-cache-dir -r requirements.txt
 
 COPY app/ ./app/
 
