@@ -111,14 +111,15 @@ jobs:
           name: sbom-${{ github.sha }}
           path: sbom.json
 
-      - name: Push Flask image to ECR
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPOSITORY: prodpai-app
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+      # TODO: re-enable ECR push after security tests pass.
+      # - name: Push Flask image to ECR
+      #   env:
+      #     ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+      #     ECR_REPOSITORY: prodpai-app
+      #     IMAGE_TAG: ${{ github.sha }}
+      #   run: |
+      #     docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+      #     docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
 
       # TODO (infra not applied yet): re-enable ASG recycle after terraform apply.
       # - name: Terminate old instances to trigger ASG
